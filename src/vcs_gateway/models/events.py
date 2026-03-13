@@ -6,10 +6,11 @@ Convention:
   *Event    → events this service PUBLISHES (outgoing)
 
 All messages inherit BaseMessage which enforces the envelope fields.
-Replace the example models below with your service-specific ones.
 """
 
 from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,27 +27,58 @@ class BaseMessage(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# EXAMPLE — replace with actual message models for your service
+# Enums
 # ---------------------------------------------------------------------------
 
 
-class ExampleConsumedMessage(BaseMessage):
-    """Message consumed from example.queue.name."""
-    event_type: str = "example.event.consumed"
-    # Add your fields here
+class JourneyStepType(StrEnum):
+    webhook_received = "webhook_received"
+    signature_verified = "signature_verified"
+    event_type_validated = "event_type_validated"
+    idempotency_checked = "idempotency_checked"
+    event_persisted = "event_persisted"
+    outbox_scheduled = "outbox_scheduled"
 
 
-class ExamplePublishedEvent(BaseMessage):
-    """Event published to example.queue.published."""
-    event_type: str = "example.event.published"
-    # Add your fields here
+class JourneyStepStatus(StrEnum):
+    in_progress = "in_progress"
+    completed = "completed"
+    failed = "failed"
+    info = "info"
+
+
+# ---------------------------------------------------------------------------
+# Published Events (outgoing)
+# ---------------------------------------------------------------------------
 
 
 class JourneyStepEvent(BaseMessage):
     """Published to journey.step.created for all lifecycle steps."""
+
     event_type: str = "journey.step.created"
-    vcs_gateway: str
-    step_type: str
-    status: str  # in_progress | completed | failed | skipped
+    service_name: str = "vcs-gateway"
+    step_type: JourneyStepType
+    status: JourneyStepStatus
     pr_hash_key: str | None = None
-    metadata: dict[str, object] | None = None
+    pr_id: str | None = None
+    repo_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WebhookReceivedMessage(BaseMessage):
+    """Published to vcs.webhook.received after successful validation + persistence."""
+
+    event_type: str = "vcs.webhook.received"
+    vcs_provider: str
+    vcs_instance_id: str
+    repo_id: str
+    repo_name: str | None
+    pr_id: str
+    pr_title: str | None
+    pr_author: str | None
+    pr_url: str | None
+    commit_sha: str
+    pr_action: str
+    pr_hash_key: str
+    pr_version: int
+    raw_payload: dict[str, Any]
