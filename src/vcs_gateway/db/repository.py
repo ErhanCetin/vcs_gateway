@@ -23,7 +23,7 @@ class BaseRepository:
     async def execute(self, query: str, *args: Any) -> str:
         start = time.perf_counter()
         async with self._pool.acquire() as conn:
-            result = await conn.execute(query, *args)
+            result: str = await conn.execute(query, *args)
         logger.debug("db_execute", duration_ms=round((time.perf_counter() - start) * 1000, 2))
         return result
 
@@ -37,8 +37,9 @@ class BaseRepository:
     async def fetch(self, query: str, *args: Any) -> list[asyncpg.Record]:
         start = time.perf_counter()
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(query, *args)
-        logger.debug("db_fetch", count=len(rows), duration_ms=round((time.perf_counter() - start) * 1000, 2))
+            rows: list[asyncpg.Record] = await conn.fetch(query, *args)
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+        logger.debug("db_fetch", count=len(rows), duration_ms=duration_ms)
         return rows
 
     @asynccontextmanager
@@ -52,6 +53,5 @@ class BaseRepository:
                 await conn.execute(INSERT_QUERY, ...)
                 await outbox_repo.insert_event(conn, ...)
         """
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                yield conn
+        async with self._pool.acquire() as conn, conn.transaction():
+            yield conn

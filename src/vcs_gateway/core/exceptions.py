@@ -10,10 +10,10 @@ class ServiceError(Exception):
 
     error_code: str = "SERVICE_ERROR"
 
-    def __init__(self, message: str, details: dict | None = None) -> None:
+    def __init__(self, message: str, details: dict[str, object] | None = None) -> None:
         super().__init__(message)
         self.message = message
-        self.details = details or {}
+        self.details: dict[str, object] = details or {}
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +70,9 @@ class ExternalServiceError(ServiceError):
     """External HTTP dependency returned an error."""
     error_code = "EXTERNAL_SERVICE_ERROR"
 
-    def __init__(self, message: str, status_code: int | None = None, details: dict | None = None) -> None:
+    def __init__(
+        self, message: str, status_code: int | None = None, details: dict[str, object] | None = None
+    ) -> None:
         super().__init__(message, details)
         self.status_code = status_code
 

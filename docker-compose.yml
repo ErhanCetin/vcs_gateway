@@ -1,8 +1,19 @@
 version: "3.9"
 
-# Local development environment
-# Starts the service + all infrastructure dependencies
-# Usage: docker compose up -d
+# =============================================================================
+# Full local dev stack: application + all infrastructure
+#
+# Usage:
+#   docker compose up -d            # start everything
+#   docker compose up -d --build    # rebuild app image first
+#   docker compose logs -f vcs-gateway
+#
+# Infra only (no app):
+#   docker compose -f docker-compose.infra.yml up -d
+# =============================================================================
+
+include:
+  - docker-compose.infra.yml
 
 services:
 
@@ -43,61 +54,3 @@ services:
   #     redis:
   #       condition: service_healthy
   #   command: python -m vcs_gateway.worker
-
-  # ---------------------------------------------------------------------------
-  # PostgreSQL 15
-  # ---------------------------------------------------------------------------
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: appuser
-      POSTGRES_PASSWORD: apppassword
-      POSTGRES_DB: appdb
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  # ---------------------------------------------------------------------------
-  # RabbitMQ 3 with management UI
-  # ---------------------------------------------------------------------------
-  rabbitmq:
-    image: rabbitmq:3.13-management-alpine
-    environment:
-      RABBITMQ_DEFAULT_USER: appuser
-      RABBITMQ_DEFAULT_PASS: apppassword
-    ports:
-      - "5672:5672"    # AMQP
-      - "15672:15672"  # Management UI → http://localhost:15672
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ---------------------------------------------------------------------------
-  # Redis 7
-  # ---------------------------------------------------------------------------
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-volumes:
-  postgres_data:
-  rabbitmq_data:
-  redis_data:

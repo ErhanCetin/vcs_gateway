@@ -112,30 +112,29 @@ class OutboxPublisher:
             await asyncio.sleep(self._poll_interval)
 
     async def _process_batch(self) -> None:
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                rows = await conn.fetch(_SELECT_PENDING, self._batch_size)
-                if not rows:
-                    return
+        async with self._pool.acquire() as conn, conn.transaction():
+            rows = await conn.fetch(_SELECT_PENDING, self._batch_size)
+            if not rows:
+                return
 
-                channel = await self._amqp_connection.channel()
+            channel = await self._amqp_connection.channel()
 
-                for row in rows:
-                    try:
-                        exchange = await channel.get_exchange(row["exchange"])
-                        await exchange.publish(
-                            aio_pika.Message(
-                                body=row["payload"].encode(),
-                                content_type="application/json",
-                                headers={"correlation_id": row["correlation_id"]},
-                            ),
-                            routing_key=row["routing_key"],
-                        )
-                        await conn.execute(_MARK_PUBLISHED, row["outbox_id"])
-                        logger.debug("outbox_published", routing_key=row["routing_key"])
-                    except Exception:
-                        logger.exception("outbox_publish_failed", outbox_id=str(row["outbox_id"]))
-                        if row["retry_count"] >= self._max_retries:
-                            await conn.execute(_MARK_FAILED, row["outbox_id"])
+            for row in rows:
+                try:
+                    exchange = await channel.get_exchange(row["exchange"])
+                    await exchange.publish(
+                        aio_pika.Message(
+                            body=row["payload"].encode(),
+                            content_type="application/json",
+                            headers={"correlation_id": row["correlation_id"]},
+                        ),
+                        routing_key=row["routing_key"],
+                    )
+                    await conn.execute(_MARK_PUBLISHED, row["outbox_id"])
+                    logger.debug("outbox_published", routing_key=row["routing_key"])
+                except Exception:
+                    logger.exception("outbox_publish_failed", outbox_id=str(row["outbox_id"]))
+                    if row["retry_count"] >= self._max_retries:
+                        await conn.execute(_MARK_FAILED, row["outbox_id"])
 
-                await channel.close()
+            await channel.close()

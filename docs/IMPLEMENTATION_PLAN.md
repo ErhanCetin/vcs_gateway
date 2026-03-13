@@ -15,9 +15,9 @@ Update this table as phases are completed:
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 0 | Prerequisites & verification | ⬜ todo |
-| 1 | Config — add missing settings | ⬜ todo |
-| 2 | DB Migration — inbound_event + outbox_event | ⬜ todo |
+| 0 | Prerequisites & verification | ✅ done |
+| 1 | Config — add missing settings | ✅ done |
+| 2 | DB Migration — shared schema seed + inbound_event + outbox_event | ✅ done |
 | 3 | Domain Models & Queue Models | ⬜ todo |
 | 4 | Repository Layer | ⬜ todo |
 | 5 | Signature Validation (pure functions) | ⬜ todo |
@@ -28,6 +28,29 @@ Update this table as phases are completed:
 | 10 | Tests | ⬜ todo |
 
 Status values: ⬜ todo | 🔄 in progress | ✅ done
+
+---
+
+## Shared Schema Dependencies
+
+VCS Gateway **reads** these shared tables (does NOT own them):
+
+| Table | Access | Purpose |
+|-------|--------|---------|
+| `shared_schema.customer` | READ-ONLY | Customer info (display/logging only) |
+| `shared_schema.tenant` | READ-ONLY | Tenant validation + webhook_secret |
+| `shared_schema.vcs_event_whitelist` | READ-ONLY | Event type filtering |
+
+VCS Gateway **writes** to:
+
+| Table | Access | Purpose |
+|-------|--------|---------|
+| `shared_schema.tenant_vcs_config` | WRITE (upsert) | Auto-register new repos on first webhook |
+
+**In production:** `shared_schema` is bootstrapped by a dedicated platform-level migration tool.
+**In local dev:** Tables are seeded by migration `0002_seed_shared_schema.py` (see Phase 2).
+
+**Canonical reference:** `/Users/ironman/netconomy/private/ai_dev_performance/NEW_MICROSERVICES/focus/SERVICE_DETAILS/Architecture/DATA_FLOW_V2_shared_db.md`
 
 ---
 
@@ -101,12 +124,132 @@ uv run mypy src/vcs_gateway/config.py
 
 ## Phase 2 — DB Migration
 
-**File:** `migrations/versions/0001_initial.py`
-**Goal:** Add `inbound_event` table and update `outbox_event` with VCS Gateway-specific columns.
+**Goal:** Create all tables needed by VCS Gateway — including shared schema seed for local dev.
+
+### Step 2a — Create `migrations/versions/0002_seed_shared_schema.py`
+
+**Purpose:** Seed `shared_schema` tables for local development. In production, these tables are managed by the platform migration pipeline and this migration is a no-op (uses `IF NOT EXISTS` + `ON CONFLICT DO NOTHING`).
+
+Create new Alembic migration:
+```bash
+uv run alembic revision --autogenerate -m "seed_shared_schema"
+# Then replace the generated body with the raw SQL below
+```
+
+Migration `upgrade()` body:
+```python
+op.execute("CREATE SCHEMA IF NOT EXISTS shared_schema")
+
+# customer
+op.execute("""
+CREATE TABLE IF NOT EXISTS shared_schema.customer (
+    customer_id     UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_name    VARCHAR(255) NOT NULL,
+    contact_email   VARCHAR(255) NOT NULL UNIQUE,
+    billing_email   VARCHAR(255),
+    plan_type       VARCHAR(50)  NOT NULL DEFAULT 'starter',
+    is_active       BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+)
+""")
+op.execute("CREATE INDEX IF NOT EXISTS idx_customer_email ON shared_schema.customer (contact_email)")
+
+# tenant
+op.execute("""
+CREATE TABLE IF NOT EXISTS shared_schema.tenant (
+    tenant_id       UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    customer_id     UUID         NOT NULL REFERENCES shared_schema.customer (customer_id),
+    tenant_name     VARCHAR(255) NOT NULL,
+    slug            VARCHAR(100) NOT NULL UNIQUE,
+    is_active       BOOLEAN      NOT NULL DEFAULT TRUE,
+    webhook_secret  VARCHAR(255) NOT NULL,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+)
+""")
+op.execute("CREATE INDEX IF NOT EXISTS idx_tenant_customer ON shared_schema.tenant (customer_id)")
+op.execute("CREATE INDEX IF NOT EXISTS idx_tenant_slug ON shared_schema.tenant (slug)")
+
+# tenant_vcs_config
+op.execute("""
+CREATE TABLE IF NOT EXISTS shared_schema.tenant_vcs_config (
+    config_id       UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id       UUID         NOT NULL REFERENCES shared_schema.tenant (tenant_id),
+    vcs_provider    VARCHAR(50)  NOT NULL,
+    vcs_instance_id VARCHAR(255) NOT NULL DEFAULT 'github.com',
+    repo_id         VARCHAR(255) NOT NULL,
+    repo_name       VARCHAR(500),
+    repo_url        VARCHAR(1000),
+    is_active       BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_tenant_vcs_repo UNIQUE (tenant_id, vcs_provider, repo_id)
+)
+""")
+
+# vcs_event_whitelist
+op.execute("""
+CREATE TABLE IF NOT EXISTS shared_schema.vcs_event_whitelist (
+    whitelist_id    UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    vcs_provider    VARCHAR(50)  NOT NULL,
+    event_type      VARCHAR(100) NOT NULL,
+    event_action    VARCHAR(100) NOT NULL,
+    is_active       BOOLEAN      NOT NULL DEFAULT TRUE,
+    description     TEXT,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_vcs_event UNIQUE (vcs_provider, event_type, event_action)
+)
+""")
+op.execute("""
+CREATE INDEX IF NOT EXISTS idx_vcs_event_whitelist_lookup
+    ON shared_schema.vcs_event_whitelist (vcs_provider, event_type, event_action)
+    WHERE is_active = TRUE
+""")
+
+# Seed: event whitelist
+op.execute("""
+INSERT INTO shared_schema.vcs_event_whitelist (vcs_provider, event_type, event_action) VALUES
+  ('github', 'pull_request',       'opened'),
+  ('github', 'pull_request',       'synchronize'),
+  ('github', 'pull_request',       'reopened'),
+  ('gitlab', 'Merge Request Hook', 'open'),
+  ('gitlab', 'Merge Request Hook', 'update'),
+  ('gitlab', 'Merge Request Hook', 'reopen')
+ON CONFLICT (vcs_provider, event_type, event_action) DO NOTHING
+""")
+
+# Seed: 1 test customer + 1 test tenant (local dev only)
+op.execute("""
+WITH ins_customer AS (
+    INSERT INTO shared_schema.customer (company_name, contact_email, plan_type)
+    VALUES ('Acme Corp', 'admin@acme.com', 'growth')
+    ON CONFLICT (contact_email) DO NOTHING
+    RETURNING customer_id
+)
+INSERT INTO shared_schema.tenant (customer_id, tenant_name, slug, webhook_secret)
+SELECT customer_id, 'Acme Dev Team', 'acme-dev', 'test-secret-12345'
+FROM ins_customer
+ON CONFLICT (slug) DO NOTHING
+""")
+```
+
+Migration `downgrade()` body:
+```python
+# Drop only if running a full teardown — shared schema is owned by platform
+# In practice, never downgrade shared_schema in production
+op.execute("DROP TABLE IF EXISTS shared_schema.tenant_vcs_config")
+op.execute("DROP TABLE IF EXISTS shared_schema.vcs_event_whitelist")
+op.execute("DROP TABLE IF EXISTS shared_schema.tenant")
+op.execute("DROP TABLE IF EXISTS shared_schema.customer")
+```
+
+---
 
 **Read first:** `migrations/versions/0001_initial.py` (current state — only has outbox_event)
 
-### Step 2a — Replace outbox_event table
+### Step 2b — Replace outbox_event table
 
 The template `outbox_event` is too generic. Replace with the VCS Gateway schema:
 
@@ -140,7 +283,7 @@ ON vcs_gateway_schema.outbox_event (dispatch_at)
 WHERE status = 'SCHEDULED'
 ```
 
-### Step 2b — Create inbound_event table
+### Step 2c — Create inbound_event table
 
 ```sql
 CREATE TABLE IF NOT EXISTS vcs_gateway_schema.inbound_event (
@@ -188,7 +331,7 @@ CREATE INDEX idx_inbound_event_status_created
     ON vcs_gateway_schema.inbound_event (processing_status, created_at DESC);
 ```
 
-### Step 2c — Apply migration
+### Step 2d — Apply migrations
 ```bash
 uv run alembic upgrade head
 ```
@@ -198,6 +341,14 @@ Verify in psql:
 docker exec -it vcs-gateway-postgres-1 psql -U appuser -d vcs_gateway_db \
   -c "\dt vcs_gateway_schema.*"
 # Should list: inbound_event, outbox_event
+
+docker exec -it vcs-gateway-postgres-1 psql -U appuser -d vcs_gateway_db \
+  -c "\dt shared_schema.*"
+# Should list: customer, tenant, tenant_vcs_config, vcs_event_whitelist
+
+docker exec -it vcs-gateway-postgres-1 psql -U appuser -d vcs_gateway_db \
+  -c "SELECT tenant_id, tenant_name, slug FROM shared_schema.tenant"
+# Should show the test tenant seeded above
 ```
 
 ---
@@ -216,10 +367,12 @@ Add these models (all `model_config = ConfigDict(from_attributes=True, frozen=Tr
 ```python
 class Tenant(BaseDomainModel):
     tenant_id: UUID
+    customer_id: UUID           # FK → shared_schema.customer
     name: str
     is_active: bool
     webhook_secret: str
-    plan_type: str
+    plan_type: str              # joined from shared_schema.customer.plan_type
+    customer_plan_type: str | None = None  # alias for plan_type when joined
 
 class VcsEventWhitelist(BaseDomainModel):
     vcs_provider: str
@@ -394,10 +547,16 @@ touch src/vcs_gateway/db/repositories/__init__.py
 ```python
 class TenantRepository(BaseRepository):
     async def get_by_id(self, tenant_id: UUID) -> Tenant | None:
-        """Fetch tenant config including webhook_secret. Returns None if not found."""
+        """Fetch tenant config with plan_type from parent customer. Returns None if not found."""
         row = await self.fetchrow(
-            "SELECT tenant_id, name, is_active, webhook_secret, plan_type "
-            "FROM shared_schema.tenant WHERE tenant_id = $1",
+            """
+            SELECT t.tenant_id, t.customer_id, t.tenant_name AS name,
+                   t.is_active, t.webhook_secret,
+                   c.plan_type, c.plan_type AS customer_plan_type
+            FROM shared_schema.tenant t
+            JOIN shared_schema.customer c ON c.customer_id = t.customer_id
+            WHERE t.tenant_id = $1
+            """,
             tenant_id,
         )
         return Tenant.model_validate(dict(row)) if row else None
@@ -413,9 +572,42 @@ class TenantRepository(BaseRepository):
         return [VcsEventWhitelist.model_validate(dict(r)) for r in rows]
 ```
 
-**Note:** `shared_schema.tenant` and `shared_schema.vcs_event_whitelist` are owned by a shared schema that VCS Gateway reads but does not own. In local dev, create these tables manually in the migration or as seed data.
+**Note:** `shared_schema.*` tables are owned by the platform but seeded locally via migration 0002.
 
-### 4c — `db/repositories/inbound_event_repository.py`
+### 4c — `db/repositories/tenant_vcs_config_repository.py` (new)
+
+```python
+class TenantVcsConfigRepository(BaseRepository):
+    async def upsert(
+        self,
+        conn: asyncpg.Connection,
+        tenant_id: UUID,
+        vcs_provider: str,
+        vcs_instance_id: str,
+        repo_id: str,
+        repo_name: str | None,
+        repo_url: str | None,
+    ) -> None:
+        """
+        Auto-onboard: register repo on first webhook. Idempotent via ON CONFLICT.
+        Must be called within an existing transaction.
+        """
+        await conn.execute(
+            """
+            INSERT INTO shared_schema.tenant_vcs_config
+                (tenant_id, vcs_provider, vcs_instance_id, repo_id, repo_name, repo_url)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (tenant_id, vcs_provider, repo_id) DO UPDATE SET
+                repo_name  = EXCLUDED.repo_name,
+                repo_url   = EXCLUDED.repo_url,
+                is_active  = TRUE,
+                updated_at = NOW()
+            """,
+            tenant_id, vcs_provider, vcs_instance_id, repo_id, repo_name, repo_url,
+        )
+```
+
+### 4e — `db/repositories/inbound_event_repository.py`
 
 ```python
 class InboundEventRepository(BaseRepository):
@@ -732,7 +924,7 @@ async with db_pool.acquire() as conn:
         outbox_id = uuid4()
         dispatch_at = datetime.utcnow() + timedelta(seconds=settings.outbox_debounce_seconds)
 
-        # Insert inbound_event
+        # 1. Insert inbound_event
         inbound = await InboundEventRepository.insert(conn, {
             event_id, correlation_id, tenant_id, vcs_provider, "github.com",
             pr_data.repo_id, pr_data.repo_name, pr_data.pr_id, pr_data.pr_title,
@@ -741,7 +933,18 @@ async with db_pool.acquire() as conn:
             raw_payload=json.loads(raw_payload), webhook_headers=relevant_headers
         })
 
-        # Insert outbox_event via OutboxRepository
+        # 2. Auto-onboard: upsert tenant_vcs_config (idempotent, no-op if already exists)
+        await TenantVcsConfigRepository.upsert(
+            conn,
+            tenant_id=tenant_id,
+            vcs_provider=vcs_provider,
+            vcs_instance_id=pr_data.vcs_instance_id,
+            repo_id=pr_data.repo_id,
+            repo_name=pr_data.repo_name,
+            repo_url=pr_data.pr_url,  # use repo_url from pr_data if available
+        )
+
+        # 3. Insert outbox_event via OutboxRepository
         payload = WebhookReceivedMessage(
             event_id=event_id, correlation_id=correlation_id,
             tenant_id=tenant_id, vcs_provider=vcs_provider,

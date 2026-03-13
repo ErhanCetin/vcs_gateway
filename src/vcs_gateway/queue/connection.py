@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from vcs_gateway.config import Settings
 
 
-async def create_amqp_connection(settings: "Settings") -> aio_pika.RobustConnection:
+async def create_amqp_connection(settings: "Settings") -> aio_pika.abc.AbstractRobustConnection:
     """
     Create a RobustConnection that handles reconnects automatically.
     Store the result on app.state.amqp_connection.

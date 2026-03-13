@@ -1,5 +1,6 @@
+import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
@@ -23,7 +24,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 1. Logging
     configure_logging(settings)
-    logger.info("starting_up", service=settings.vcs_gateway, env=settings.environment)
+    logger.info("starting_up", service=settings.service_name, env=settings.environment)
 
     # 2. OpenTelemetry (before any I/O so instrumentors are active)
     configure_telemetry(
@@ -54,7 +55,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         poll_interval=settings.outbox_poll_interval_seconds,
         batch_size=settings.outbox_batch_size,
     )
-    import asyncio
     outbox_task = asyncio.create_task(outbox_publisher.run())
 
     logger.info("startup_complete")
@@ -63,10 +63,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Shutdown — reverse order
     logger.info("shutting_down")
     outbox_task.cancel()
-    try:
+    with suppress(asyncio.CancelledError):
         await outbox_task
-    except asyncio.CancelledError:
-        pass
 
     await app.state.redis.aclose()
     await app.state.amqp_connection.close()
@@ -78,7 +76,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     app = FastAPI(
-        title=settings.vcs_gateway,
+        title=settings.service_name,
         version="0.1.0",
         docs_url="/docs" if settings.environment == "local" else None,
         redoc_url=None,

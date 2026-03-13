@@ -30,7 +30,7 @@ def _handle_signal(sig: signal.Signals) -> None:
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings)
-    logger.info("worker_starting", service=settings.vcs_gateway)
+    logger.info("worker_starting", service=settings.service_name)
 
     # Register OS signal handlers
     loop = asyncio.get_running_loop()
@@ -59,7 +59,7 @@ async def main() -> None:
     finally:
         logger.info("worker_stopping")
         # await consumer.stop()
-        await redis_client.aclose()
+        await redis_client.aclose()  # type: ignore[attr-defined]
         await amqp_connection.close()
         await db_pool.close()
         logger.info("worker_stopped")
