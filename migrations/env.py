@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -7,11 +8,9 @@ from sqlalchemy.ext.asyncio import create_async_engine
 config = context.config
 fileConfig(config.config_file_name)  # type: ignore[arg-type]
 
-# Read DATABASE_URL from environment (overrides alembic.ini)
-import os
-db_url = os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
-# Convert asyncpg DSN to SQLAlchemy async format
-db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+# DATABASE_URL must be set in environment (via .env.local or shell)
+_raw_url = os.environ["DATABASE_URL"]
+db_url = _raw_url.replace("postgresql://", "postgresql+asyncpg://")
 
 
 def run_migrations_offline() -> None:

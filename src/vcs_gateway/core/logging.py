@@ -37,7 +37,7 @@ def configure_logging(settings: "Settings") -> None:
 
     # Bind service-level context to every log entry
     structlog.contextvars.bind_contextvars(
-        service=settings.vcs_gateway,
+        service=settings.service_name,
         env=settings.environment,
     )
 

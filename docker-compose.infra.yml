@@ -27,7 +27,7 @@ services:
       POSTGRES_PASSWORD: apppassword
       POSTGRES_DB: vcs_gateway_db
     ports:
-      - "5432:5432"
+      - "5655:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

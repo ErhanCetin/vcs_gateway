@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 1. Logging
     configure_logging(settings)
-    logger.info("starting_up", service=settings.vcs_gateway, env=settings.environment)
+    logger.info("starting_up", service=settings.service_name, env=settings.environment)
 
     # 2. OpenTelemetry (before any I/O so instrumentors are active)
     configure_telemetry(
@@ -76,7 +76,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     app = FastAPI(
-        title=settings.vcs_gateway,
+        title=settings.service_name,
         version="0.1.0",
         docs_url="/docs" if settings.environment == "local" else None,
         redoc_url=None,

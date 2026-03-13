@@ -1,0 +1,2 @@
+- vcs_event_white list tablosu vcs_provider lara bakiyor.. aslinda ara bir tablo yapip tenant + vcs_provider seviyesinde hangi repo eventlere izin verilmesi daha mantikli.. Yani A tenant sadece pr open , b tenant belki ilerde daha kapsamli metric isleme icin farkli eventler assign edilebilinir.
+ 

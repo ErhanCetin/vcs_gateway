@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     # Service identity
     # -----------------------------------------------------------------------
-    vcs_gateway: str = "vcs-gateway"
+    service_name: str = "vcs-gateway"
     environment: Literal["local", "staging", "production"] = "local"
     log_level: str = "INFO"
     port: int = 8000
@@ -58,12 +58,12 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     # VCS Gateway — service-specific settings
     # -----------------------------------------------------------------------
-    service_name: str = "vcs-gateway"
     rabbitmq_exchange_webhook: str = "vcs.webhook.received"
     rabbitmq_exchange_journey: str = "journey.events"
     redis_idempotency_ttl_seconds: int = 259200  # 72 hours
     outbox_debounce_seconds: int = 30
     webhook_hmac_algorithm: str = "sha256"
+    webhook_request_timeout_seconds: int = 5
 
 
 @lru_cache

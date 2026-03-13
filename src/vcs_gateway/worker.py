@@ -30,7 +30,7 @@ def _handle_signal(sig: signal.Signals) -> None:
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings)
-    logger.info("worker_starting", service=settings.vcs_gateway)
+    logger.info("worker_starting", service=settings.service_name)
 
     # Register OS signal handlers
     loop = asyncio.get_running_loop()

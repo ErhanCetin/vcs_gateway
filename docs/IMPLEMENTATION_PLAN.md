@@ -16,8 +16,8 @@ Update this table as phases are completed:
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 0 | Prerequisites & verification | ✅ done |
-| 1 | Config — add missing settings | ⬜ todo |
-| 2 | DB Migration — shared schema seed + inbound_event + outbox_event | ⬜ todo |
+| 1 | Config — add missing settings | ✅ done |
+| 2 | DB Migration — shared schema seed + inbound_event + outbox_event | ✅ done |
 | 3 | Domain Models & Queue Models | ⬜ todo |
 | 4 | Repository Layer | ⬜ todo |
 | 5 | Signature Validation (pure functions) | ⬜ todo |
