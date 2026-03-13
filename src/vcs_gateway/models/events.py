@@ -49,4 +49,4 @@ class JourneyStepEvent(BaseMessage):
     step_type: str
     status: str  # in_progress | completed | failed | skipped
     pr_hash_key: str | None = None
-    metadata: dict | None = None
+    metadata: dict[str, object] | None = None

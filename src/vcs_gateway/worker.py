@@ -59,7 +59,7 @@ async def main() -> None:
     finally:
         logger.info("worker_stopping")
         # await consumer.stop()
-        await redis_client.aclose()
+        await redis_client.aclose()  # type: ignore[attr-defined]
         await amqp_connection.close()
         await db_pool.close()
         logger.info("worker_stopped")

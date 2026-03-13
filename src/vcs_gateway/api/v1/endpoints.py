@@ -12,6 +12,6 @@ router = APIRouter()
 
 
 @router.get("/ping")
-async def ping() -> dict:
+async def ping() -> dict[str, str]:
     """Example endpoint — replace or remove."""
     return {"message": "pong"}

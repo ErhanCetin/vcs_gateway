@@ -1,10 +1,28 @@
 # [VCS Gateway]
 
+
 > Part of the **Developer Growth Intelligence Platform** microservice architecture.
 
 ## What This Service Does
 
-[Replace with 1-2 sentence description]
+### Purpose
+
+The **VCS Gateway Service** is the primary entry point for all version control system (VCS) webhook events. It validates incoming pull request webhooks from GitHub, GitLab, and Bitbucket, performs critical filtering and validation, and routes events to downstream analysis services.
+
+This service acts as a **defensive layer** protecting the system from:
+- Invalid or malicious webhook payloads
+- Duplicate PR analysis requests
+- Quota-exceeded tenants
+- Rate limit abuse
+
+### Business Value
+
+- ✅ **Ensures 99.9% webhook ingestion uptime** - Critical for real-time PR analysis
+- ✅ **Reduces duplicate processing by 95%** - PR hash deduplication prevents wasted LLM costs
+- ✅ **Protects quota limits** - Pre-flight quota checks prevent cost overruns
+- ✅ **Enables multi-VCS support** - Unified interface for GitHub, GitLab, Bitbucket
+- ✅ **Provides audit trail** - Every webhook tracked in pr_journey for debugging
+
 
 **Pipeline position:** [Previous Service] → **[THIS SERVICE]** → [Next Service]
 

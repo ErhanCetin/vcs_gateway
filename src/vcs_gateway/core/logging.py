@@ -14,7 +14,7 @@ def configure_logging(settings: "Settings") -> None:
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
-        structlog.processors.add_logger_name,
+        structlog.stdlib.add_logger_name,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
@@ -44,4 +44,4 @@ def configure_logging(settings: "Settings") -> None:
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     """Return a bound structlog logger for the given module name."""
-    return structlog.get_logger(name)
+    return structlog.get_logger(name)  # type: ignore[no-any-return]

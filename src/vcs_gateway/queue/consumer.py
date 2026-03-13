@@ -23,7 +23,7 @@ logger = structlog.get_logger(__name__)
 class BaseConsumer(ABC):
     def __init__(
         self,
-        amqp_connection: aio_pika.RobustConnection,
+        amqp_connection: aio_pika.abc.AbstractRobustConnection,
         queue_name: str,
         dlq_name: str,
         prefetch_count: int = 10,
@@ -32,7 +32,7 @@ class BaseConsumer(ABC):
         self._queue_name = queue_name
         self._dlq_name = dlq_name
         self._prefetch_count = prefetch_count
-        self._channel: aio_pika.Channel | None = None
+        self._channel: aio_pika.abc.AbstractChannel | None = None
 
     @abstractmethod
     async def process_message(self, payload: dict[str, Any], correlation_id: str) -> None:
@@ -61,8 +61,9 @@ class BaseConsumer(ABC):
             await self._channel.close()
         logger.info("consumer_stopped", queue=self._queue_name)
 
-    async def _on_message(self, message: aio_pika.IncomingMessage) -> None:
-        correlation_id = (message.headers or {}).get("correlation_id", "unknown")
+    async def _on_message(self, message: aio_pika.abc.AbstractIncomingMessage) -> None:
+        headers = message.headers or {}
+        correlation_id = str(headers.get("correlation_id", "unknown"))
         start = time.perf_counter()
 
         structlog.contextvars.bind_contextvars(
@@ -71,7 +72,7 @@ class BaseConsumer(ABC):
         )
 
         try:
-            payload = json.loads(message.body)
+            payload: dict[str, Any] = json.loads(message.body)
             await self.process_message(payload, correlation_id)
             await message.ack()
             logger.info(

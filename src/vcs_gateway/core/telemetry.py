@@ -68,7 +68,7 @@ def configure_telemetry(
 
     trace.set_tracer_provider(provider)
 
-    AsyncPGInstrumentor().instrument()
+    AsyncPGInstrumentor().instrument()  # type: ignore[no-untyped-call]
     AioPikaInstrumentor().instrument()
     RedisInstrumentor().instrument()
     HTTPXClientInstrumentor().instrument()

@@ -1,6 +1,6 @@
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 import structlog
 from fastapi import Request, Response
@@ -21,7 +21,9 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.header_name = header_name
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         correlation_id = request.headers.get(self.header_name) or str(uuid.uuid4())
 
         structlog.contextvars.bind_contextvars(correlation_id=correlation_id)
@@ -41,7 +43,9 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
     SKIP_PATHS = {"/health/live", "/health/ready"}
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         if request.url.path in self.SKIP_PATHS:
             return await call_next(request)
 
