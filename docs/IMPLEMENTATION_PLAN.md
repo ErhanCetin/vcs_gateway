@@ -18,13 +18,13 @@ Update this table as phases are completed:
 | 0 | Prerequisites & verification | ✅ done |
 | 1 | Config — add missing settings | ✅ done |
 | 2 | DB Migration — shared schema seed + inbound_event + outbox_event | ✅ done |
-| 3 | Domain Models & Queue Models | ⬜ todo |
-| 4 | Repository Layer | ⬜ todo |
-| 5 | Signature Validation (pure functions) | ⬜ todo |
-| 6 | Redis Layer | ⬜ todo |
-| 7 | Business Logic — VcsGatewayService | ⬜ todo |
-| 8 | API Endpoints | ⬜ todo |
-| 9 | Outbox Dispatcher — debounce logic | ⬜ todo |
+| 3 | Domain Models & Queue Models | ✅ done |
+| 4 | Repository Layer | ✅ done |
+| 5 | Signature Validation (pure functions) | ✅ done |
+| 6 | Redis Layer | ✅ done |
+| 7 | Business Logic — VcsGatewayService | ✅ done |
+| 8 | API Endpoints | ✅ done |
+| 9 | Outbox Dispatcher — debounce logic | ✅ done |
 | 10 | Tests | ⬜ todo |
 
 Status values: ⬜ todo | 🔄 in progress | ✅ done
