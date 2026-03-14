@@ -8,7 +8,8 @@ OutboxPublisher   — background task that polls SCHEDULED rows at dispatch_at
 Status lifecycle:
   SCHEDULED → DISPATCHED  (happy path)
   SCHEDULED → CANCELLED   (newer version arrived within debounce window)
-  DISPATCHED → FAILED     (publish error after max_retries exhausted)
+  SCHEDULED → SCHEDULED   (publish error, retry_count < max_retries, dispatch_at updated)
+  SCHEDULED → FAILED      (publish error, retry_count >= max_retries)
 """
 
 import asyncio
@@ -45,7 +46,16 @@ _MARK_DISPATCHED = f"""
 _MARK_FAILED = f"""
     UPDATE {_SCHEMA}.outbox_event
     SET status = 'FAILED', retry_count = retry_count + 1,
-        error_message = $2, next_retry_at = $3
+        error_message = $2, next_retry_at = NULL
+    WHERE outbox_id = $1
+"""
+
+_MARK_RETRY = f"""
+    UPDATE {_SCHEMA}.outbox_event
+    SET retry_count = retry_count + 1,
+        error_message = $2,
+        dispatch_at   = $3,
+        next_retry_at = $3
     WHERE outbox_id = $1
 """
 
@@ -110,11 +120,17 @@ class OutboxRepository:
         return row["outbox_id"]  # type: ignore[no-any-return]
 
 
+_MAX_BACKOFF_SECONDS = 3600  # 1 hour cap
+
+
 class OutboxPublisher:
     """
     Background asyncio task.
     Polls outbox_event for SCHEDULED rows whose dispatch_at has passed,
     publishes to RabbitMQ, marks them DISPATCHED.
+
+    AMQP channel is created once and reused across batches.
+    It is re-acquired if the channel/connection is closed unexpectedly.
     """
 
     def __init__(
@@ -130,6 +146,16 @@ class OutboxPublisher:
         self._exchange_name = exchange_name
         self._poll_interval = poll_interval
         self._batch_size = batch_size
+        self._channel: aio_pika.abc.AbstractChannel | None = None
+        self._exchange: aio_pika.abc.AbstractExchange | None = None
+
+    async def _get_exchange(self) -> aio_pika.abc.AbstractExchange:
+        """Return cached exchange; re-acquire if channel is closed."""
+        if self._channel is None or self._channel.is_closed:
+            self._channel = await self._amqp_connection.channel()
+            self._exchange = await self._channel.get_exchange(self._exchange_name)
+        assert self._exchange is not None  # noqa: S101
+        return self._exchange
 
     async def run(self) -> None:
         logger.info("outbox_publisher_started", exchange=self._exchange_name)
@@ -138,9 +164,14 @@ class OutboxPublisher:
                 await self._process_batch()
             except asyncio.CancelledError:
                 logger.info("outbox_publisher_stopped")
+                if self._channel and not self._channel.is_closed:
+                    await self._channel.close()
                 return
             except Exception:
                 logger.exception("outbox_publisher_error")
+                # Reset channel on unexpected error so next iteration re-connects.
+                self._channel = None
+                self._exchange = None
             await asyncio.sleep(self._poll_interval)
 
     async def _process_batch(self) -> None:
@@ -149,17 +180,23 @@ class OutboxPublisher:
             if not rows:
                 return
 
-            channel = await self._amqp_connection.channel()
-            try:
-                exchange = await channel.get_exchange(self._exchange_name)
+            exchange = await self._get_exchange()
 
-                for row in rows:
-                    outbox_id: UUID = row["outbox_id"]
+            for row in rows:
+                outbox_id: UUID = row["outbox_id"]
+                # Per-row savepoint: status update for this row is committed
+                # even if a later row in the same batch fails.
+                async with conn.transaction(isolation="read_committed"):
                     try:
                         headers: dict[str, Any] = json.loads(row["headers"])
+                        payload_bytes = (
+                            row["payload"]
+                            if isinstance(row["payload"], bytes)
+                            else row["payload"].encode()
+                        )
                         await exchange.publish(
                             aio_pika.Message(
-                                body=row["payload"].encode(),
+                                body=payload_bytes,
                                 content_type="application/json",
                                 headers=headers,
                             ),
@@ -179,11 +216,14 @@ class OutboxPublisher:
                             outbox_id=str(outbox_id),
                             retry_count=retry_count,
                         )
-                        next_retry_at = (
-                            datetime.now(UTC) + timedelta(seconds=30 * (retry_count + 1))
-                            if retry_count < max_retries
-                            else None
-                        )
-                        await conn.execute(_MARK_FAILED, outbox_id, str(exc), next_retry_at)
-            finally:
-                await channel.close()
+                        if retry_count + 1 >= max_retries:
+                            await conn.execute(_MARK_FAILED, outbox_id, str(exc))
+                        else:
+                            backoff = min(
+                                30 * (2 ** (retry_count + 1)), _MAX_BACKOFF_SECONDS
+                            )
+                            next_retry_at = datetime.now(UTC) + timedelta(seconds=backoff)
+                            await conn.execute(_MARK_RETRY, outbox_id, str(exc), next_retry_at)
+                        # Reset channel after publish failure — connection may be unhealthy.
+                        self._channel = None
+                        self._exchange = None

@@ -1,5 +1,7 @@
 import json
-from typing import TYPE_CHECKING
+from contextlib import suppress
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 import redis.asyncio as aioredis
 
@@ -32,21 +34,62 @@ async def check_redis_health(client: "aioredis.Redis[str]") -> bool:
 async def get_idempotency_cache(
     client: "aioredis.Redis[str]",
     pr_hash_key: str,
-) -> dict[str, object] | None:
+) -> str | None:
     """
     Read the idempotency cache entry for the given pr_hash_key.
-    Returns the cached dict or None on cache miss / Redis unavailable.
+    Returns the raw string value ("1") or None on cache miss / Redis unavailable.
 
     Cache key format: idempotency:{pr_hash_key}
     """
     try:
-        raw = await client.get(f"idempotency:{pr_hash_key}")
+        return await client.get(f"idempotency:{pr_hash_key}")
+    except Exception:
+        return None
+
+
+async def get_tenant_cache(
+    client: "aioredis.Redis[str]",
+    tenant_id: UUID,
+) -> dict[str, Any] | None:
+    """
+    Cache-Aside: read tenant config from Redis.
+    Key: tenant:config:{tenant_id}
+    Returns None on cache miss or Redis unavailable.
+    TTL managed by set_tenant_cache (default 5 minutes).
+    """
+    try:
+        raw = await client.get(f"tenant:config:{tenant_id}")
         if raw is None:
             return None
-        result: dict[str, object] = json.loads(raw)
+        result: dict[str, Any] = json.loads(raw)
         return result
     except Exception:
         return None
+
+
+async def set_tenant_cache(
+    client: "aioredis.Redis[str]",
+    tenant_id: UUID,
+    tenant_data: dict[str, Any],
+    ttl_seconds: int = 300,
+) -> None:
+    """Write tenant config to Redis (best-effort — never raises)."""
+    with suppress(Exception):
+        await client.setex(
+            f"tenant:config:{tenant_id}",
+            ttl_seconds,
+            json.dumps(tenant_data, default=str),
+        )
+
+
+async def set_idempotency_cache(
+    client: "aioredis.Redis[str]",
+    pr_hash_key: str,
+    ttl_seconds: int = 259200,
+) -> None:
+    """Write-back to idempotency cache after successful processing (best-effort — never raises)."""
+    with suppress(Exception):
+        await client.setex(f"idempotency:{pr_hash_key}", ttl_seconds, "1")
 
 
 def is_stale(cached_entry: dict[str, object] | None, current_pr_version: int) -> bool:
